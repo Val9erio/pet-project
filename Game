@@ -1,0 +1,239 @@
+import random
+
+SIZE = 10
+
+tiles = {
+    "empty": "⬜",
+    "forest": "🌲",
+    "water": "🌊",
+    "mountain": "⛰",
+    "player": "🧑",
+    "enemy": "👹",
+    "boss": "👑",
+    "shop": "🏪"
+}
+
+player = {
+    "hp": 100,
+    "max_hp": 100,
+    "attack": 12,
+    "gold": 50,
+    "potions": 2,
+    "weapon": "Кулаки"
+}
+
+player_pos = [0,0]
+
+# ===== генерація карти =====
+
+game_map = []
+
+for y in range(SIZE):
+
+    row = []
+
+    for x in range(SIZE):
+
+        r = random.random()
+
+        if r < 0.1:
+            row.append("water")
+        elif r < 0.2:
+            row.append("mountain")
+        elif r < 0.5:
+            row.append("forest")
+        else:
+            row.append("empty")
+
+    game_map.append(row)
+
+# ===== вороги =====
+
+enemies = []
+
+for _ in range(8):
+    enemies.append([random.randint(0,9), random.randint(0,9)])
+
+boss = [random.randint(0,9), random.randint(0,9)]
+shop = [random.randint(0,9), random.randint(0,9)]
+
+# ===== карта =====
+
+def draw_map():
+
+    print("\n🗺 КАРТА")
+
+    for y in range(SIZE):
+
+        for x in range(SIZE):
+
+            if [y,x] == player_pos:
+                print(tiles["player"], end=" ")
+
+            elif [y,x] == boss:
+                print(tiles["boss"], end=" ")
+
+            elif [y,x] in enemies:
+                print(tiles["enemy"], end=" ")
+
+            elif [y,x] == shop:
+                print(tiles["shop"], end=" ")
+
+            else:
+                print(tiles[game_map[y][x]], end=" ")
+
+        print()
+
+# ===== бій =====
+
+def fight(strong=False):
+
+    enemy_hp = random.randint(40,70)
+
+    if strong:
+        enemy_hp = 120
+        enemy_attack = 20
+        print("\n👑 БІЙ З БОСОМ!")
+    else:
+        enemy_attack = random.randint(8,15)
+        print("\n⚔️ БІЙ!")
+
+    while enemy_hp > 0 and player["hp"] > 0:
+
+        print("\nHP:",player["hp"],"| Enemy:",enemy_hp)
+
+        print("1 Атака")
+        print("2 Зілля")
+
+        choice = input("> ")
+
+        if choice == "1":
+
+            dmg = random.randint(5,player["attack"])
+            enemy_hp -= dmg
+
+            print("Ти наніс",dmg)
+
+        elif choice == "2" and player["potions"] > 0:
+
+            heal = random.randint(20,35)
+            player["hp"] = min(player["max_hp"], player["hp"] + heal)
+            player["potions"] -= 1
+
+            print("Вилікував",heal)
+
+        if enemy_hp > 0:
+
+            dmg = random.randint(5,enemy_attack)
+            player["hp"] -= dmg
+
+            print("Ворог атакував",dmg)
+
+    if player["hp"] <= 0:
+        print("💀 ТИ ПРОГРАВ")
+        exit()
+
+    print("🎉 ПЕРЕМОГА")
+
+    gold = random.randint(15,40)
+    player["gold"] += gold
+
+    print("Отримано золото:",gold)
+
+# ===== магазин =====
+
+def shop_menu():
+
+    print("\n🏪 МАГАЗИН")
+
+    print("Gold:",player["gold"])
+
+    print("1 Зілля (20)")
+    print("2 Меч +5 атаки (60)")
+    print("3 Сокира +8 атаки (100)")
+    print("0 Вийти")
+
+    choice = input("> ")
+
+    if choice == "1" and player["gold"] >= 20:
+
+        player["gold"] -= 20
+        player["potions"] += 1
+        print("Куплено зілля")
+
+    elif choice == "2" and player["gold"] >= 60:
+
+        player["gold"] -= 60
+        player["attack"] += 5
+        player["weapon"] = "Меч"
+        print("Тепер у тебе меч")
+
+    elif choice == "3" and player["gold"] >= 100:
+
+        player["gold"] -= 100
+        player["attack"] += 8
+        player["weapon"] = "Сокира"
+        print("Тепер у тебе сокира")
+
+# ===== рух =====
+
+def move(d):
+
+    if d=="w" and player_pos[0]>0:
+        player_pos[0]-=1
+
+    if d=="s" and player_pos[0]<SIZE-1:
+        player_pos[0]+=1
+
+    if d=="a" and player_pos[1]>0:
+        player_pos[1]-=1
+
+    if d=="d" and player_pos[1]<SIZE-1:
+        player_pos[1]+=1
+
+    check_tile()
+
+# ===== перевірка клітинки =====
+
+def check_tile():
+
+    if player_pos in enemies:
+
+        enemies.remove(player_pos.copy())
+        fight()
+
+    if player_pos == boss:
+
+        fight(True)
+        print("\n🏆 ТИ ПЕРЕМІГ БОСА! ГРА ПРОЙДЕНА")
+        exit()
+
+    if player_pos == shop:
+        shop_menu()
+
+# ===== гра =====
+
+def game():
+
+    print("🎮 RPG ADVENTURE")
+
+    while True:
+
+        draw_map()
+
+        print("\nHP:",player["hp"],
+              "| Gold:",player["gold"],
+              "| Weapon:",player["weapon"],
+              "| Potions:",player["potions"])
+
+        print("\nW A S D рух")
+        print("Q вихід")
+
+        move_input = input("> ").lower()
+
+        if move_input == "q":
+            break
+
+        move(move_input)
+
+game()
