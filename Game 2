@@ -1,0 +1,545 @@
+import random
+import json
+import os
+
+SIZE = 10
+SAVE_FILE = "save.json"
+
+tiles = {
+    "empty": "⬜",
+    "forest": "🌲",
+    "water": "🌊",
+    "mountain": "⛰",
+    "p1": "🧑",
+    "p2": "👤",
+    "boss": "👑",
+    "shop": "🏪"
+}
+
+# ===== PLAYER =====
+class Player:
+    def __init__(self, name, icon):
+        self.name = name
+        self.icon = icon
+        self.hp = 100
+        self.max_hp = 100
+        self.attack = 12
+        self.gold = 50
+        self.potions = 2
+        self.weapon = "Кулаки"
+        self.pos = [0,0]
+
+    def to_dict(self):
+        return self.__dict__
+
+    def load(self, data):
+        self.__dict__.update(data)
+
+# ===== SAVE / LOAD =====
+def save_game(p1, p2):
+    with open(SAVE_FILE, "w") as f:
+        json.dump({"p1": p1.to_dict(), "p2": p2.to_dict(),
+                   "enemies": enemies, "boss": boss, "shop": shop}, f)
+    print("💾 Збережено!")
+
+def load_game():
+    if not os.path.exists(SAVE_FILE):
+        return None
+    with open(SAVE_FILE) as f:
+        return json.load(f)
+
+# ===== MAP =====
+def generate_map():
+    m = []
+    for _ in range(SIZE):
+        row = []
+        for _ in range(SIZE):
+            r = random.random()
+            if r < 0.1: row.append("water")
+            elif r < 0.2: row.append("mountain")
+            elif r < 0.5: row.append("forest")
+            else: row.append("empty")
+        m.append(row)
+    return m
+
+game_map = generate_map()
+
+# ===== ENEMIES =====
+def spawn_enemies():
+    types = ["tank","archer","fast"]
+    es = []
+    for _ in range(8):
+        t = random.choice(types)
+        es.append({
+            "type": t,
+            "pos": [random.randint(0,SIZE-1), random.randint(0,SIZE-1)],
+            "hp": 80 if t=="tank" else 40,
+            "attack": 8 if t=="archer" else 12,
+            "range": 2 if t=="archer" else 1
+        })
+    return es
+
+enemies = spawn_enemies()
+boss = [random.randint(0,SIZE-1), random.randint(0,SIZE-1)]
+shop = [random.randint(0,SIZE-1), random.randint(0,SIZE-1)]
+
+# ===== MAP DRAW =====
+def draw_map(p1,p2):
+    print("\n🗺 КАРТА")
+    for y in range(SIZE):
+        for x in range(SIZE):
+
+            if [y,x]==p1.pos: print(p1.icon,end=" ")
+            elif [y,x]==p2.pos: print(p2.icon,end=" ")
+            elif [y,x]==boss: print("👑",end=" ")
+            elif [y,x]==shop: print("🏪",end=" ")
+            elif any(e["pos"]==[y,x] for e in enemies):
+                e = next(e for e in enemies if e["pos"]==[y,x])
+                print("🛡" if e["type"]=="tank" else "🏹" if e["type"]=="archer" else "⚡",end=" ")
+            else:
+                print(tiles[game_map[y][x]],end=" ")
+        print()
+
+# ===== MOVEMENT CHECK =====
+def can_move(y,x):
+    if y<0 or x<0 or y>=SIZE or x>=SIZE:
+        return False
+    if game_map[y][x] in ["water","mountain"]:
+        return False
+    return True
+
+# ===== RESPawn =====
+def respawn(p):
+    print(f"\n❤️ {p.name} відродився!")
+    p.hp = p.max_hp
+    p.pos = [random.randint(0,SIZE-1), random.randint(0,SIZE-1)]
+    p.gold = max(0,p.gold-20)
+
+# ===== BATTLE =====
+def fight(player, strong=False):
+    hp = 120 if strong else 60
+    atk = 20 if strong else 10
+
+    while hp>0 and player.hp>0:
+        print(f"\n{player.name} HP:{player.hp} | Enemy:{hp}")
+        print("1-Атака 2-Зілля")
+        c=input("> ")
+
+        if c=="1":
+            dmg=random.randint(5,player.attack)
+            hp-=dmg
+            print("Ти наніс",dmg)
+        elif c=="2" and player.potions>0:
+            heal=random.randint(20,30)
+            player.hp=min(player.max_hp,player.hp+heal)
+            player.potions-=1
+
+        if hp>0:
+            dmg=random.randint(5,atk)
+            player.hp-=dmg
+            print("Ворог:",dmg)
+
+    if player.hp<=0:
+        respawn(player)
+    else:
+        player.gold+=30
+        print("🎉 Перемога!")
+
+# ===== SHOP =====
+def shop_menu(p):
+    print("\n🏪 Магазин")
+    print("1 Зілля (20)")
+    print("2 Меч +5 (60)")
+    print("0 Вихід")
+
+    c=input("> ")
+    if c=="1" and p.gold>=20:
+        p.gold-=20
+        p.potions+=1
+    elif c=="2" and p.gold>=60:
+        p.gold-=60
+        p.attack+=5
+        p.weapon="Меч"
+
+# ===== PLAYER MOVE =====
+def move(p,cmd):
+    y,x=p.pos
+    if cmd=="w" and can_move(y-1,x): p.pos[0]-=1
+    if cmd=="s" and can_move(y+1,x): p.pos[0]+=1
+    if cmd=="a" and can_move(y,x-1): p.pos[1]-=1
+    if cmd=="d" and can_move(y,x+1): p.pos[1]+=1
+    check_tile(p)
+
+# ===== TILE =====
+def check_tile(p):
+    global enemies
+
+    for e in enemies:
+        if e["pos"]==p.pos:
+            enemies.remove(e)
+            fight(p)
+            break
+
+    if p.pos==boss:
+        fight(p,True)
+        print("🏆 БОС ПЕРЕМОЖЕНИЙ")
+        exit()
+
+    if p.pos==shop:
+        shop_menu(p)
+
+# ===== ENEMY AI =====
+def move_enemies(p1,p2):
+
+    for e in enemies:
+
+        target = p1 if abs(e["pos"][0]-p1.pos[0])+abs(e["pos"][1]-p1.pos[1]) < \
+                         abs(e["pos"][0]-p2.pos[0])+abs(e["pos"][1]-p2.pos[1]) else p2
+
+        dy = target.pos[0]-e["pos"][0]
+        dx = target.pos[1]-e["pos"][1]
+
+        # ranged attack
+        if abs(dy)+abs(dx) <= e["range"]:
+            dmg=random.randint(5,e["attack"])
+            target.hp-=dmg
+            print(f"\n🏹 {target.name} отримав {dmg}")
+
+            if target.hp<=0:
+                respawn(target)
+        else:
+            ny = e["pos"][0]+(1 if dy>0 else -1 if dy<0 else 0)
+            nx = e["pos"][1]+(1 if dx>0 else -1 if dx<0 else 0)
+
+            if can_move(ny,e["pos"][1]): e["pos"][0]=ny
+            elif can_move(e["pos"][0],nx): e["pos"][1]=nx
+
+        if e["pos"]==target.pos:
+            dmg=random.randint(5,e["attack"])
+            target.hp-=dmg
+            print(f"👹 {target.name} отримав {dmg}")
+            if target.hp<=0:
+                respawn(target)
+
+# ===== MAIN =====
+def game():
+
+    print("1 Нова гра")
+    print("2 Завантажити")
+
+    c=input("> ")
+
+    if c=="2":
+        data=load_game()
+        if not data:
+            print("Нема сейва"); return
+
+        p1=Player("", "🧑"); p1.load(data["p1"])
+        p2=Player("", "👤"); p2.load(data["p2"])
+
+        global enemies,boss,shop
+        enemies=data["enemies"]; boss=data["boss"]; shop=data["shop"]
+
+    else:
+        p1=Player(input("Гравець1: "), "🧑")
+        p2=Player(input("Гравець2: "), "👤")
+        p2.pos=[SIZE-1,SIZE-1]
+
+    players=[p1,p2]
+    turn=0
+
+    while True:
+
+        cur=players[turn]
+
+        draw_map(p1,p2)
+
+        print(f"\nХід: {cur.name} HP:{cur.hp} Gold:{cur.gold} Potions:{cur.potions}")
+
+        print("WASD | save | q")
+
+        cmd=input("> ").lower()
+
+        if cmd=="q": break
+        if cmd=="save":
+            save_game(p1,p2)
+            continue
+
+        move(cur,cmd)
+        move_enemies(p1,p2)
+
+        turn=1-turn
+
+game()import random
+import json
+import os
+
+SIZE = 10
+SAVE_FILE = "save.json"
+
+tiles = {
+    "empty": "⬜",
+    "forest": "🌲",
+    "water": "🌊",
+    "mountain": "⛰",
+    "p1": "🧑",
+    "p2": "👤",
+    "boss": "👑",
+    "shop": "🏪"
+}
+
+# ===== PLAYER =====
+class Player:
+    def __init__(self, name, icon):
+        self.name = name
+        self.icon = icon
+        self.hp = 100
+        self.max_hp = 100
+        self.attack = 12
+        self.gold = 50
+        self.potions = 2
+        self.weapon = "Кулаки"
+        self.pos = [0,0]
+
+    def to_dict(self):
+        return self.__dict__
+
+    def load(self, data):
+        self.__dict__.update(data)
+
+# ===== SAVE / LOAD =====
+def save_game(p1, p2):
+    with open(SAVE_FILE, "w") as f:
+        json.dump({"p1": p1.to_dict(), "p2": p2.to_dict(),
+                   "enemies": enemies, "boss": boss, "shop": shop}, f)
+    print("💾 Збережено!")
+
+def load_game():
+    if not os.path.exists(SAVE_FILE):
+        return None
+    with open(SAVE_FILE) as f:
+        return json.load(f)
+
+# ===== MAP =====
+def generate_map():
+    m = []
+    for _ in range(SIZE):
+        row = []
+        for _ in range(SIZE):
+            r = random.random()
+            if r < 0.1: row.append("water")
+            elif r < 0.2: row.append("mountain")
+            elif r < 0.5: row.append("forest")
+            else: row.append("empty")
+        m.append(row)
+    return m
+
+game_map = generate_map()
+
+# ===== ENEMIES =====
+def spawn_enemies():
+    types = ["tank","archer","fast"]
+    es = []
+    for _ in range(8):
+        t = random.choice(types)
+        es.append({
+            "type": t,
+            "pos": [random.randint(0,SIZE-1), random.randint(0,SIZE-1)],
+            "hp": 80 if t=="tank" else 40,
+            "attack": 8 if t=="archer" else 12,
+            "range": 2 if t=="archer" else 1
+        })
+    return es
+
+enemies = spawn_enemies()
+boss = [random.randint(0,SIZE-1), random.randint(0,SIZE-1)]
+shop = [random.randint(0,SIZE-1), random.randint(0,SIZE-1)]
+
+# ===== MAP DRAW =====
+def draw_map(p1,p2):
+    print("\n🗺 КАРТА")
+    for y in range(SIZE):
+        for x in range(SIZE):
+
+            if [y,x]==p1.pos: print(p1.icon,end=" ")
+            elif [y,x]==p2.pos: print(p2.icon,end=" ")
+            elif [y,x]==boss: print("👑",end=" ")
+            elif [y,x]==shop: print("🏪",end=" ")
+            elif any(e["pos"]==[y,x] for e in enemies):
+                e = next(e for e in enemies if e["pos"]==[y,x])
+                print("🛡" if e["type"]=="tank" else "🏹" if e["type"]=="archer" else "⚡",end=" ")
+            else:
+                print(tiles[game_map[y][x]],end=" ")
+        print()
+
+# ===== MOVEMENT CHECK =====
+def can_move(y,x):
+    if y<0 or x<0 or y>=SIZE or x>=SIZE:
+        return False
+    if game_map[y][x] in ["water","mountain"]:
+        return False
+    return True
+
+# ===== RESPawn =====
+def respawn(p):
+    print(f"\n❤️ {p.name} відродився!")
+    p.hp = p.max_hp
+    p.pos = [random.randint(0,SIZE-1), random.randint(0,SIZE-1)]
+    p.gold = max(0,p.gold-20)
+
+# ===== BATTLE =====
+def fight(player, strong=False):
+    hp = 120 if strong else 60
+    atk = 20 if strong else 10
+
+    while hp>0 and player.hp>0:
+        print(f"\n{player.name} HP:{player.hp} | Enemy:{hp}")
+        print("1-Атака 2-Зілля")
+        c=input("> ")
+
+        if c=="1":
+            dmg=random.randint(5,player.attack)
+            hp-=dmg
+            print("Ти наніс",dmg)
+        elif c=="2" and player.potions>0:
+            heal=random.randint(20,30)
+            player.hp=min(player.max_hp,player.hp+heal)
+            player.potions-=1
+
+        if hp>0:
+            dmg=random.randint(5,atk)
+            player.hp-=dmg
+            print("Ворог:",dmg)
+
+    if player.hp<=0:
+        respawn(player)
+    else:
+        player.gold+=30
+        print("🎉 Перемога!")
+
+# ===== SHOP =====
+def shop_menu(p):
+    print("\n🏪 Магазин")
+    print("1 Зілля (20)")
+    print("2 Меч +5 (60)")
+    print("0 Вихід")
+
+    c=input("> ")
+    if c=="1" and p.gold>=20:
+        p.gold-=20
+        p.potions+=1
+    elif c=="2" and p.gold>=60:
+        p.gold-=60
+        p.attack+=5
+        p.weapon="Меч"
+
+# ===== PLAYER MOVE =====
+def move(p,cmd):
+    y,x=p.pos
+    if cmd=="w" and can_move(y-1,x): p.pos[0]-=1
+    if cmd=="s" and can_move(y+1,x): p.pos[0]+=1
+    if cmd=="a" and can_move(y,x-1): p.pos[1]-=1
+    if cmd=="d" and can_move(y,x+1): p.pos[1]+=1
+    check_tile(p)
+
+# ===== TILE =====
+def check_tile(p):
+    global enemies
+
+    for e in enemies:
+        if e["pos"]==p.pos:
+            enemies.remove(e)
+            fight(p)
+            break
+
+    if p.pos==boss:
+        fight(p,True)
+        print("🏆 БОС ПЕРЕМОЖЕНИЙ")
+        exit()
+
+    if p.pos==shop:
+        shop_menu(p)
+
+# ===== ENEMY AI =====
+def move_enemies(p1,p2):
+
+    for e in enemies:
+
+        target = p1 if abs(e["pos"][0]-p1.pos[0])+abs(e["pos"][1]-p1.pos[1]) < \
+                         abs(e["pos"][0]-p2.pos[0])+abs(e["pos"][1]-p2.pos[1]) else p2
+
+        dy = target.pos[0]-e["pos"][0]
+        dx = target.pos[1]-e["pos"][1]
+
+        # ranged attack
+        if abs(dy)+abs(dx) <= e["range"]:
+            dmg=random.randint(5,e["attack"])
+            target.hp-=dmg
+            print(f"\n🏹 {target.name} отримав {dmg}")
+
+            if target.hp<=0:
+                respawn(target)
+        else:
+            ny = e["pos"][0]+(1 if dy>0 else -1 if dy<0 else 0)
+            nx = e["pos"][1]+(1 if dx>0 else -1 if dx<0 else 0)
+
+            if can_move(ny,e["pos"][1]): e["pos"][0]=ny
+            elif can_move(e["pos"][0],nx): e["pos"][1]=nx
+
+        if e["pos"]==target.pos:
+            dmg=random.randint(5,e["attack"])
+            target.hp-=dmg
+            print(f"👹 {target.name} отримав {dmg}")
+            if target.hp<=0:
+                respawn(target)
+
+# ===== MAIN =====
+def game():
+
+    print("1 Нова гра")
+    print("2 Завантажити")
+
+    c=input("> ")
+
+    if c=="2":
+        data=load_game()
+        if not data:
+            print("Нема сейва"); return
+
+        p1=Player("", "🧑"); p1.load(data["p1"])
+        p2=Player("", "👤"); p2.load(data["p2"])
+
+        global enemies,boss,shop
+        enemies=data["enemies"]; boss=data["boss"]; shop=data["shop"]
+
+    else:
+        p1=Player(input("Гравець1: "), "🧑")
+        p2=Player(input("Гравець2: "), "👤")
+        p2.pos=[SIZE-1,SIZE-1]
+
+    players=[p1,p2]
+    turn=0
+
+    while True:
+
+        cur=players[turn]
+
+        draw_map(p1,p2)
+
+        print(f"\nХід: {cur.name} HP:{cur.hp} Gold:{cur.gold} Potions:{cur.potions}")
+
+        print("WASD | save | q")
+
+        cmd=input("> ").lower()
+
+        if cmd=="q": break
+        if cmd=="save":
+            save_game(p1,p2)
+            continue
+
+        move(cur,cmd)
+        move_enemies(p1,p2)
+
+        turn=1-turn
+
+game()
