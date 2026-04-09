@@ -1,0 +1,264 @@
+import pygame
+import random
+import sys
+
+pygame.init()
+
+WIDTH, HEIGHT = 600, 700
+TILE = 60
+SIZE = 10
+
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("RPG Clean")
+
+font = pygame.font.SysFont("Arial", 16)
+clock = pygame.time.Clock()
+
+# ===== COLORS =====
+colors = {
+    "empty": (210,210,210),
+    "forest": (34,139,34),
+    "water": (30,144,255),
+    "mountain": (120,120,120),
+    "p1": (255,80,80),
+    "p2": (80,80,255),
+    "enemy": (0,0,0),
+    "boss": (255,215,0),
+    "shop": (255,105,180),
+    "hp": (0,200,0),
+    "hp_bg": (120,0,0)
+}
+
+# ===== PLAYER =====
+class Player:
+    def __init__(self, name, color):
+        self.name=name
+        self.color=color
+        self.hp=100
+        self.max_hp=100
+        self.attack=10
+        self.gold=50
+        self.potions=2
+        self.weapon="sword"
+        self.xp=0
+        self.level=1
+        self.pos=[0,0]
+
+    def level_up(self):
+        if self.xp>=100:
+            self.xp=0
+            self.level+=1
+            self.max_hp+=10
+            self.attack+=2
+            log.append(f"{self.name} LEVEL UP!")
+
+# ===== MAP =====
+def gen_map():
+    m=[]
+    for _ in range(SIZE):
+        row=[]
+        for _ in range(SIZE):
+            r=random.random()
+            if r<0.1: row.append("water")
+            elif r<0.2: row.append("mountain")
+            elif r<0.5: row.append("forest")
+            else: row.append("empty")
+        m.append(row)
+    return m
+
+game_map=gen_map()
+
+# ===== ENEMIES =====
+def spawn_enemies():
+    es=[]
+    for _ in range(6):
+        t=random.choice(["normal","archer"])
+        es.append({
+            "type":t,
+            "pos":[random.randint(0,9),random.randint(0,9)],
+            "hp":40,
+            "attack":5 if t=="archer" else 10,
+            "range":2 if t=="archer" else 1,
+            "cooldown":0
+        })
+    return es
+
+enemies=spawn_enemies()
+boss=[random.randint(0,9),random.randint(0,9)]
+shop=[random.randint(0,9),random.randint(0,9)]
+
+log=[]
+
+# ===== DRAW =====
+def draw_hp(x,y,hp,max_hp):
+    pygame.draw.rect(screen, colors["hp_bg"], (x,y,40,5))
+    w=int(40*(hp/max_hp))
+    pygame.draw.rect(screen, colors["hp"], (x,y,w,5))
+
+def draw():
+    for y in range(SIZE):
+        for x in range(SIZE):
+            pygame.draw.rect(screen, colors[game_map[y][x]],
+                             (x*TILE,y*TILE,TILE,TILE))
+
+    for e in enemies:
+        pygame.draw.circle(screen, colors["enemy"],
+                           (e["pos"][1]*TILE+30, e["pos"][0]*TILE+30), 8)
+
+    pygame.draw.circle(screen, colors["boss"],
+                       (boss[1]*TILE+30,boss[0]*TILE+30),12)
+
+    pygame.draw.circle(screen, colors["shop"],
+                       (shop[1]*TILE+30,shop[0]*TILE+30),8)
+
+    pygame.draw.rect(screen, p1.color,
+                     (p1.pos[1]*TILE+10,p1.pos[0]*TILE+10,40,40))
+    pygame.draw.rect(screen, p2.color,
+                     (p2.pos[1]*TILE+10,p2.pos[0]*TILE+10,40,40))
+
+    draw_hp(p1.pos[1]*TILE+10,p1.pos[0]*TILE+5,p1.hp,p1.max_hp)
+    draw_hp(p2.pos[1]*TILE+10,p2.pos[0]*TILE+5,p2.hp,p2.max_hp)
+
+# ===== UI =====
+def draw_ui():
+    txt=f"P1 L{p1.level} HP:{p1.hp} XP:{p1.xp} | P2 L{p2.level} HP:{p2.hp} XP:{p2.xp}"
+    screen.blit(font.render(txt,True,(255,255,255)),(10,610))
+
+    for i,l in enumerate(log[-3:]):
+        screen.blit(font.render(l,True,(255,255,255)),(10,630+i*18))
+
+# ===== MOVE =====
+def can_move(y,x):
+    if y<0 or x<0 or y>=SIZE or x>=SIZE: return False
+    if game_map[y][x] in ["water","mountain"]: return False
+    return True
+
+def move(p,dy,dx):
+    ny=p.pos[0]+dy
+    nx=p.pos[1]+dx
+    if can_move(ny,nx):
+        p.pos=[ny,nx]
+        check(p)
+
+# ===== COMBAT =====
+def attack_player(p,e):
+    if p.weapon=="sword":
+        dmg=random.randint(6,12)
+    elif p.weapon=="bow":
+        dmg=random.randint(4,8)
+    else:
+        dmg=random.randint(5,15)
+
+    e["hp"]-=dmg
+    log.append(f"{p.name} hit {dmg}")
+
+def fight(p,e,strong=False):
+    hp=80 if strong else e["hp"]
+
+    while hp>0 and p.hp>0:
+        dmg=random.randint(5,p.attack)
+        hp-=dmg
+        p.hp-=random.randint(3,8)
+
+    if p.hp<=0:
+        p.hp=100
+        p.pos=[0,0]
+        log.append(f"{p.name} died")
+    else:
+        p.gold+=20
+        p.xp+=50
+        p.level_up()
+
+# ===== TILE =====
+def check(p):
+    global enemies
+
+    for e in enemies:
+        if e["pos"]==p.pos:
+            fight(p,e)
+            enemies.remove(e)
+            break
+
+    if p.pos==boss:
+        fight(p,{"hp":100},True)
+        log.append("🏆 BOSS DOWN!")
+
+    if p.pos==shop:
+        if p.gold>=20:
+            p.gold-=20
+            p.potions+=1
+            log.append("Купив зілля")
+
+# ===== AI =====
+def dist(e,p):
+    return abs(e["pos"][0]-p.pos[0])+abs(e["pos"][1]-p.pos[1])
+
+def enemy_ai():
+    for e in enemies:
+        e["cooldown"]-=1
+
+        target=p1 if dist(e,p1)<dist(e,p2) else p2
+        dy=target.pos[0]-e["pos"][0]
+        dx=target.pos[1]-e["pos"][1]
+
+        if e["type"]=="archer":
+            if abs(dy)+abs(dx)<=2 and e["cooldown"]<=0:
+                target.hp-=random.randint(2,4)
+                e["cooldown"]=3
+
+        else:
+            if abs(dy)+abs(dx)<=1:
+                target.hp-=random.randint(5,10)
+
+        # рух
+        if abs(dy)>abs(dx):
+            step=1 if dy>0 else -1
+            if can_move(e["pos"][0]+step,e["pos"][1]):
+                e["pos"][0]+=step
+        else:
+            step=1 if dx>0 else -1
+            if can_move(e["pos"][0],e["pos"][1]+step):
+                e["pos"][1]+=step
+
+# ===== INIT =====
+p1=Player("P1",colors["p1"])
+p2=Player("P2",colors["p2"])
+p2.pos=[9,9]
+
+turn=0
+
+# ===== LOOP =====
+while True:
+    screen.fill((0,0,0))
+
+    for event in pygame.event.get():
+        if event.type==pygame.QUIT:
+            pygame.quit(); sys.exit()
+
+        if event.type==pygame.KEYDOWN:
+            cur=p1 if turn==0 else p2
+
+            if event.key==pygame.K_w: move(cur,-1,0)
+            if event.key==pygame.K_s: move(cur,1,0)
+            if event.key==pygame.K_a: move(cur,0,-1)
+            if event.key==pygame.K_d: move(cur,0,1)
+
+            # зброя
+            if event.key==pygame.K_1: cur.weapon="sword"
+            if event.key==pygame.K_2: cur.weapon="bow"
+            if event.key==pygame.K_3: cur.weapon="magic"
+
+            # зілля
+            if event.key==pygame.K_SPACE and cur.potions>0:
+                cur.hp=min(cur.max_hp,cur.hp+30)
+                cur.potions-=1
+                log.append("Зілля використано")
+
+            enemy_ai()
+            turn=1-turn
+
+    draw()
+    draw_ui()
+
+    pygame.display.flip()
+    clock.tick(10)
