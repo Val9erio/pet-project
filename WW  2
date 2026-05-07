@@ -1,0 +1,479 @@
+import pygame
+import random
+import math
+import sys
+
+pygame.init()
+WIDTH, HEIGHT = 1024, 768
+TILE = 32
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Terraria: Particles & Loot Edition")
+clock = pygame.time.Clock()
+
+
+# ===== ПРОЦЕДУРНІ ТЕКСТУРИ =====
+def make_tex(base_color, variance=15, border=True, pattern=None):
+    surf = pygame.Surface((TILE, TILE))
+    for y in range(TILE):
+        for x in range(TILE):
+            r = max(0, min(255, base_color[0] + random.randint(-variance, variance)))
+            g = max(0, min(255, base_color[1] + random.randint(-variance, variance)))
+            b = max(0, min(255, base_color[2] + random.randint(-variance, variance)))
+            surf.set_at((x, y), (r, g, b))
+
+    if pattern == "ore":
+        for _ in range(6):
+            pygame.draw.rect(surf, (255, 215, 0), (random.randint(0, TILE - 5), random.randint(0, TILE - 5), 4, 4))
+    elif pattern == "water":
+        surf.set_alpha(150)
+    elif pattern == "chest":
+        pygame.draw.rect(surf, (139, 69, 19), (2, 2, TILE - 4, TILE - 4))  # Дерево
+        pygame.draw.rect(surf, (169, 169, 169), (0, 8, TILE, 4))  # Залізо
+        pygame.draw.rect(surf, (255, 215, 0), (TILE // 2 - 3, 8, 6, 8))  # Замок
+
+    if border and pattern != "water":
+        pygame.draw.rect(surf, (max(0, base_color[0] - 40), max(0, base_color[1] - 40), max(0, base_color[2] - 40)),
+                         (0, 0, TILE, TILE), 1)
+    return surf
+
+
+def make_icon(item_type):
+    surf = pygame.Surface((32, 32), pygame.SRCALPHA)
+    if item_type == "sword":
+        pygame.draw.line(surf, (150, 150, 150), (4, 28), (28, 4), 6)
+        pygame.draw.line(surf, (139, 69, 19), (4, 28), (10, 22), 6)
+    elif item_type == "magic_sword":
+        pygame.draw.line(surf, (0, 255, 255), (4, 28), (28, 4), 8)
+    elif item_type == "pickaxe":
+        pygame.draw.line(surf, (139, 69, 19), (4, 28), (24, 8), 4)
+        pygame.draw.arc(surf, (150, 150, 150), (8, 0, 24, 24), 0, 3.14, 5)
+    return surf
+
+
+# Базові кольори для блоків (використовуються і для текстур, і для частинок)
+BLOCK_COLORS = {
+    "dirt": (105, 62, 40), "grass": (50, 180, 50), "stone": (100, 100, 100),
+    "bedrock": (30, 30, 30), "sand": (237, 201, 175), "snow": (240, 248, 255),
+    "ice": (173, 216, 230), "gold_ore": (100, 100, 100), "mud": (60, 40, 20),
+    "jungle_grass": (30, 150, 30), "crimson_dirt": (100, 30, 30),
+    "crimson_grass": (150, 20, 20), "crimstone": (80, 20, 20),
+    "water": (0, 100, 200), "chest": (139, 69, 19)
+}
+
+TEXTURES = {}
+for name, color in BLOCK_COLORS.items():
+    if name == "gold_ore":
+        TEXTURES[name] = make_tex(color, pattern="ore")
+    elif name == "water":
+        TEXTURES[name] = make_tex(color, border=False, pattern="water")
+    elif name == "chest":
+        TEXTURES[name] = make_tex(color, border=False, pattern="chest")
+    else:
+        TEXTURES[name] = make_tex(color)
+
+ICONS = {"sword": make_icon("sword"), "magic_sword": make_icon("magic_sword"), "pickaxe": make_icon("pickaxe")}
+
+# ===== ГЕНЕРАЦІЯ СВІТУ =====
+cols, rows = 600, 200
+world = []
+heights = []
+
+
+def get_biome_type(tx):
+    if tx < 80:
+        return "ocean"
+    elif tx < 200:
+        return "jungle"
+    elif tx < 350:
+        return "forest"
+    elif tx < 450:
+        return "crimson"
+    elif tx < 530:
+        return "desert"
+    else:
+        return "snow"
+
+
+current_h = rows // 4
+sea_level = rows // 4 + 4
+
+for x in range(cols):
+    biome = get_biome_type(x)
+    if biome == "ocean":
+        current_h += random.choice([0, 0, 1])
+        current_h = min(sea_level + 15, current_h)
+    else:
+        if random.random() < 0.10: current_h += random.choice([-1, 1, 1, -1, 2, -2])
+        current_h = max(10, min(rows // 3, current_h))
+    heights.append(int(current_h))
+
+for y in range(rows):
+    row = []
+    for x in range(cols):
+        surface = heights[x]
+        b_name = get_biome_type(x)
+
+        if y == rows - 1:
+            row.append("bedrock")
+        elif y > surface:
+            is_cave = False
+            if y > surface + 15:
+                if math.sin(x * 0.2) + math.cos(y * 0.2) + random.uniform(-0.5, 0.5) > 0.8: is_cave = True
+
+            if is_cave:
+                row.append("air")  
+            elif y > surface + random.randint(10, 20):
+                if random.random() < 0.02:
+                    row.append("gold_ore")
+                else:
+                    row.append("crimstone" if b_name == "crimson" else "stone")
+            else:
+                if b_name == "snow":
+                    row.append("ice" if y > surface + 1 else "snow")
+                elif b_name in ["desert", "ocean"]:
+                    row.append("sand")
+                elif b_name == "jungle":
+                    row.append("mud" if y > surface else "jungle_grass")
+                elif b_name == "crimson":
+                    row.append("crimson_dirt" if y > surface else "crimson_grass")
+                else:
+                    row.append("dirt" if y > surface else "grass")
+        else:
+            if b_name == "ocean" and y >= sea_level:
+                row.append("water")
+            else:
+                row.append("air")
+    world.append(row)
+
+# Розставляємо Скрині в печерах
+for _ in range(40):
+    cx, cy = random.randint(10, cols - 10), random.randint(rows // 3, rows - 10)
+    if world[cy][cx] == "air" and world[cy + 1][cx] not in ["air", "water", "bedrock"]:
+        world[cy][cx] = "chest"
+
+# ===== СИСТЕМА ЧАСТИНОК (НОВА) =====
+particles = []
+
+
+class Particle:
+    def __init__(self, x, y, color, speed_mult=1.0):
+        self.x, self.y = x, y
+        self.vx = random.uniform(-4, 4) * speed_mult
+        self.vy = random.uniform(-6, -1) * speed_mult
+        self.color = color
+        self.max_life = random.randint(15, 35)
+        self.life = self.max_life
+
+    def update(self):
+        self.x += self.vx
+        self.y += self.vy
+        self.vy += 0.4  # Гравітація для частинок
+        self.life -= 1
+
+    def draw(self):
+        if self.life > 0:
+            # Чим менше життя, тим менша частинка
+            size = max(1, int(6 * (self.life / self.max_life)))
+            pygame.draw.rect(screen, self.color, (self.x - camera_x, self.y - camera_y, size, size))
+
+
+def spawn_particles(x, y, color, count=10, speed=1.0):
+    for _ in range(count):
+        particles.append(Particle(x, y, color, speed))
+
+
+# ===== СУТНОСТІ =====
+class Player:
+    def __init__(self):
+        self.w, self.h = 24, 42
+        self.x = 280 * TILE
+        self.y = 10
+        self.vel_x, self.vel_y = 0, 0
+        self.on_ground = False
+        self.hp = 100
+        self.inventory = {"sword": 1, "pickaxe": 1, "dirt": 10}
+        self.hotbar = ["sword", "pickaxe", "dirt", "stone", "sand"]
+        self.sel_idx = 0
+        self.action_cd = 0
+        self.reach = 6 * TILE
+        self.facing_right = True
+
+    def rect(self): return pygame.Rect(self.x, self.y, self.w, self.h)
+
+
+class Enemy:
+    def __init__(self, x, y, biome):
+        self.w, self.h = 28, 40
+        self.x, self.y = x, y
+        self.vel_x, self.vel_y = 0, 0
+        self.hp = 30
+        self.on_ground = False
+        # Колір моба залежить від біому!
+        if biome == "snow":
+            self.color = (200, 230, 255)
+        elif biome == "crimson":
+            self.color = (180, 20, 20)
+        elif biome == "jungle":
+            self.color = (40, 100, 40)
+        elif biome == "desert":
+            self.color = (200, 150, 50)
+        else:
+            self.color = (46, 139, 87)  # Звичайний зомбі
+
+    def rect(self):
+        return pygame.Rect(self.x, self.y, self.w, self.h)
+
+
+player = Player()
+enemies = []
+camera_x, camera_y = 0, 0
+
+# UI та Біоми
+current_biome_str = "Forest"
+biome_fade_alpha = 255
+BIOME_COLORS = {
+    "ocean": (50, 150, 255), "jungle": (100, 180, 100), "forest": (135, 206, 235),
+    "crimson": (150, 60, 60), "desert": (255, 200, 100), "snow": (200, 230, 255)
+}
+current_sky_color = list(BIOME_COLORS["forest"])
+
+
+def get_biome_display_name(x, y):
+    if y > heights[max(0, min(cols - 1, int(x // TILE)))] * TILE + 600: return "Underground", "underground"
+    tx = max(0, min(cols - 1, int(x // TILE)))
+    b_id = get_biome_type(tx)
+    names = {"ocean": "The Ocean", "jungle": "Deep Jungle", "forest": "Lush Forest",
+             "crimson": "The Crimson", "desert": "Scorching Desert", "snow": "Frozen Tundra"}
+    return names[b_id], b_id
+
+
+# ===== ФІЗИКА =====
+def get_blocks(entity):
+    res = []
+    mx, M_x = max(0, int(entity.x // TILE) - 1), min(cols - 1, int((entity.x + entity.w) // TILE) + 1)
+    my, M_y = max(0, int(entity.y // TILE) - 1), min(rows - 1, int((entity.y + entity.h) // TILE) + 1)
+    for y in range(my, M_y + 1):
+        for x in range(mx, M_x + 1):
+            if world[y][x] not in ["air", "water"]:
+                res.append(pygame.Rect(x * TILE, y * TILE, TILE, TILE))
+    return res
+
+
+def move(e):
+    e.x += e.vel_x
+    e.x = max(0, min(e.x, cols * TILE - e.w))
+    for b in get_blocks(e):
+        if e.rect().colliderect(b):
+            if e.vel_x > 0:
+                e.x = b.left - e.w
+            elif e.vel_x < 0:
+                e.x = b.right
+
+    e.vel_y += 0.5
+    if e.vel_y > 15: e.vel_y = 15
+    e.y += e.vel_y
+    e.on_ground = False
+
+    for b in get_blocks(e):
+        if e.rect().colliderect(b):
+            if e.vel_y > 0:
+                e.y, e.vel_y, e.on_ground = b.top - e.h, 0, True
+            elif e.vel_y < 0:
+                e.y, e.vel_y = b.bottom, 0
+
+
+# ===== ГОЛОВНИЙ ЦИКЛ =====
+big_font = pygame.font.SysFont("Impact", 60)
+font = pygame.font.SysFont(None, 24)
+
+while True:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            sys.exit()
+        if event.type == pygame.KEYDOWN:
+            if pygame.K_1 <= event.key <= pygame.K_6:
+                player.sel_idx = event.key - pygame.K_1
+
+    if player.action_cd > 0: player.action_cd -= 1
+
+    # Мишка та Взаємодія
+    mouse_x, mouse_y = pygame.mouse.get_pos()
+    click = pygame.mouse.get_pressed()
+    wx, wy = mouse_x + camera_x, mouse_y + camera_y
+    tx, ty = int(wx // TILE), int(wy // TILE)
+    sel_item = player.hotbar[player.sel_idx]
+
+    dist = math.hypot(wx - (player.x + player.w / 2), wy - (player.y + player.h / 2))
+    in_reach = dist <= player.reach
+    valid_tile = 0 <= tx < cols and 0 <= ty < rows
+
+    if player.action_cd == 0:
+        if click[0]:  # ЛАМАТИ / БИТИ
+            if sel_item == "pickaxe" and valid_tile and in_reach:
+                if world[ty][tx] not in ["air", "bedrock", "water"]:
+                    block = world[ty][tx]
+
+                    # Логіка Скрині
+                    if block == "chest":
+                        player.inventory["magic_sword"] = 1
+                        if "magic_sword" not in player.hotbar:
+                            player.hotbar.insert(1, "magic_sword")
+                        player.inventory["gold_ore"] = player.inventory.get("gold_ore", 0) + 5
+                        spawn_particles(wx, wy, (255, 215, 0), 20, 2.0)  # Вибух золота!
+                    else:
+                        player.inventory[block] = player.inventory.get(block, 0) + 1
+                        p_color = BLOCK_COLORS.get(block, (150, 150, 150))
+                        spawn_particles(wx, wy, p_color, 8)  # Частинки блоку
+
+                    world[ty][tx] = "air"
+                    player.action_cd = 12
+
+            elif sel_item in ["sword", "magic_sword"]:
+                # Якщо Magic Sword, б'ємо швидше!
+                player.action_cd = 10 if sel_item == "magic_sword" else 20
+                hit_rect = pygame.Rect(player.x + (20 if player.facing_right else -40), player.y, 40, 40)
+                for e in enemies[:]:
+                    if hit_rect.colliderect(e.rect()):
+                        dmg = 20 if sel_item == "magic_sword" else 10
+                        e.hp -= dmg
+                        e.vel_x = 8 if player.facing_right else -8
+                        e.vel_y = -5
+
+                        spawn_particles(e.x + e.w / 2, e.y + e.h / 2, (200, 0, 0), 10)  # Кров!
+
+                        if e.hp <= 0: enemies.remove(e)
+
+        elif click[2] and sel_item not in ["sword", "pickaxe", "magic_sword"]:
+            if valid_tile and in_reach and player.inventory.get(sel_item, 0) > 0 and world[ty][tx] in ["air", "water"]:
+                if not pygame.Rect(tx * TILE, ty * TILE, TILE, TILE).colliderect(player.rect()):
+                    world[ty][tx] = sel_item
+                    player.inventory[sel_item] -= 1
+                    player.action_cd = 10
+
+    # Рух гравця
+    keys = pygame.key.get_pressed()
+    player.vel_x = 0
+    if keys[pygame.K_a]:
+        player.vel_x = -6
+        player.facing_right = False
+    if keys[pygame.K_d]:
+        player.vel_x = 6
+        player.facing_right = True
+    if (keys[pygame.K_w] or keys[pygame.K_SPACE]) and player.on_ground: player.vel_y = -10
+    for e in enemies[:]:
+        e.hp -= 0.04
+        if e.hp <= 0:
+            enemies.remove(e)
+    move(player)
+
+    # Спавн ворогів
+    if random.randint(1, 100) == 1 and len(enemies) < 8:
+        spawn_x = player.x + random.choice([-500, 500])
+        if 0 < spawn_x < cols * TILE:
+            e_biome = get_biome_type(int(spawn_x // TILE))
+            enemies.append(Enemy(spawn_x, 0, e_biome))
+
+    # ШІ ворогів
+    for e in enemies:
+        if e.x < player.x - 10:
+            e.vel_x = 1.5
+        elif e.x > player.x + 10:
+            e.vel_x = -1.5
+        else:
+            e.vel_x = 0
+
+        if e.vel_x != 0 and e.on_ground:
+            fx = int((e.x + (TILE if e.vel_x > 0 else -5)) // TILE)
+            if 0 <= fx < cols and world[int(e.y // TILE)][fx] not in ["air", "water"]:
+                e.vel_y = -9
+
+        move(e)
+        if e.rect().colliderect(player.rect()):
+            player.hp -= 0.5
+
+            # Камера та Біоми
+    camera_x += ((player.x - WIDTH // 2) - camera_x) * 0.1
+    camera_y += ((player.y - HEIGHT // 2) - camera_y) * 0.1
+    camera_x = max(0, min(camera_x, cols * TILE - WIDTH))
+    camera_y = max(0, min(camera_y, rows * TILE - HEIGHT))
+
+    b_name, b_id = get_biome_display_name(player.x, player.y)
+    if b_name != current_biome_str:
+        current_biome_str = b_name
+        biome_fade_alpha = 255
+
+    target_c = BIOME_COLORS.get(b_id, (30, 20, 20))  # Під землею темно
+    current_sky_color[0] += (target_c[0] - current_sky_color[0]) * 0.05
+    current_sky_color[1] += (target_c[1] - current_sky_color[1]) * 0.05
+    current_sky_color[2] += (target_c[2] - current_sky_color[2]) * 0.05
+
+    # --- РЕНДЕР ---
+    screen.fill((int(current_sky_color[0]), int(current_sky_color[1]), int(current_sky_color[2])))
+
+    sx, ex = max(0, int(camera_x // TILE)), min(cols, int((camera_x + WIDTH) // TILE) + 1)
+    sy, ey = max(0, int(camera_y // TILE)), min(rows, int((camera_y + HEIGHT) // TILE) + 1)
+
+    for y in range(sy, ey):
+        for x in range(sx, ex):
+            block = world[y][x]
+            if block != "air":
+                screen.blit(TEXTURES.get(block, TEXTURES["dirt"]), (x * TILE - camera_x, y * TILE - camera_y))
+
+    # Виділення блоку
+    if valid_tile and in_reach:
+        pygame.draw.rect(screen, (255, 255, 255), (tx * TILE - camera_x, ty * TILE - camera_y, TILE, TILE), 2)
+
+    # Оновлення та малювання частинок
+    for p in particles[:]:
+        p.update()
+        p.draw()
+        if p.life <= 0: particles.remove(p)
+
+    # Малюємо Ворогів
+    for e in enemies:
+        pygame.draw.rect(screen, e.color, (e.x - camera_x, e.y - camera_y, e.w, e.h))
+        pygame.draw.rect(screen, (0, 0, 0), (e.x - camera_x, e.y - camera_y, e.w, e.h), 2)  # Контур
+        pygame.draw.rect(screen, (255, 0, 0), (e.x - camera_x, e.y - camera_y - 10, e.w * (e.hp / 30), 4))  # ХП
+
+    # Гравець
+    pygame.draw.rect(screen, (50, 50, 255), (player.x - camera_x, player.y - camera_y, player.w, player.h))
+
+    # Зброя
+    if sel_item in ["sword", "magic_sword", "pickaxe"]:
+        off_y = 15 if player.action_cd > 0 else 0
+        w_icon = ICONS[sel_item]
+        if not player.facing_right: w_icon = pygame.transform.flip(w_icon, True, False)
+        screen.blit(pygame.transform.scale(w_icon, (40, 40)),
+                    (player.x - camera_x + (10 if player.facing_right else -20), player.y - camera_y + off_y))
+
+    # --- UI ---
+    for i, item in enumerate(player.hotbar):
+        r = pygame.Rect(10 + i * 50, 10, 46, 46)
+        pygame.draw.rect(screen, (50, 50, 50, 150), r)
+        if i == player.sel_idx: pygame.draw.rect(screen, (255, 215, 0), r, 3)
+
+        if item in ICONS:
+            screen.blit(pygame.transform.scale(ICONS[item], (40, 40)), (13 + i * 50, 13))
+        elif item in TEXTURES:
+            screen.blit(TEXTURES[item], (17 + i * 50, 17))
+            cnt_sh = font.render(str(player.inventory.get(item, 0)), True, (0, 0, 0))
+            cnt = font.render(str(player.inventory.get(item, 0)), True, (255, 255, 255))
+            screen.blit(cnt_sh, (16 + i * 50, 36))
+            screen.blit(cnt, (15 + i * 50, 35))
+
+    # ХП Гравця
+    pygame.draw.rect(screen, (255, 0, 0), (WIDTH - 220, 20, max(0, player.hp) * 2, 20))
+    pygame.draw.rect(screen, (255, 255, 255), (WIDTH - 220, 20, 200, 20), 2)
+    hp_text = font.render(f"HP: {int(player.hp)}", True, (255, 255, 255))
+    screen.blit(hp_text, (WIDTH - 150, 22))
+
+    # Текст Біому
+    if biome_fade_alpha > 0:
+        biome_fade_alpha -= 2
+        txt_surf = big_font.render(current_biome_str, True, (255, 255, 255))
+        txt_surf.set_alpha(biome_fade_alpha)
+        screen.blit(txt_surf, (WIDTH // 2 - txt_surf.get_width() // 2, HEIGHT // 4))
+
+    pygame.display.flip()
+    clock.tick(60)
